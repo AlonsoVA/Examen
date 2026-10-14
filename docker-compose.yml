@@ -1,0 +1,99 @@
+services:
+  parcels-db:
+    image: postgres:16-alpine
+    container_name: urban-parcels-db
+    environment:
+      POSTGRES_DB: ${PARCELS_DB_NAME:-parcels_db}
+      POSTGRES_USER: ${PARCELS_DB_USER:-parcels_user}
+      POSTGRES_PASSWORD: ${PARCELS_DB_PASSWORD:-parcels_pass}
+    ports:
+      - "5433:5432"
+    volumes:
+      - parcels_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - gardens-net
+    restart: unless-stopped
+
+  monitoring-db:
+    image: postgres:16-alpine
+    container_name: urban-monitoring-db
+    environment:
+      POSTGRES_DB: ${MONITORING_DB_NAME:-monitoring_db}
+      POSTGRES_USER: ${MONITORING_DB_USER:-monitoring_user}
+      POSTGRES_PASSWORD: ${MONITORING_DB_PASSWORD:-monitoring_pass}
+    ports:
+      - "5434:5432"
+    volumes:
+      - monitoring_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - gardens-net
+    restart: unless-stopped
+
+  parcel-service:
+    build: ./parcel-service
+    container_name: urban-parcel-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://parcels-db:5432/${PARCELS_DB_NAME:-parcels_db}
+      SPRING_DATASOURCE_USERNAME: ${PARCELS_DB_USER:-parcels_user}
+      SPRING_DATASOURCE_PASSWORD: ${PARCELS_DB_PASSWORD:-parcels_pass}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "8081:8081"
+    depends_on:
+      parcels-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - gardens-net
+    restart: on-failure
+
+  monitoring-service:
+    build: ./monitoring-service
+    container_name: urban-monitoring-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://monitoring-db:5432/${MONITORING_DB_NAME:-monitoring_db}
+      SPRING_DATASOURCE_USERNAME: ${MONITORING_DB_USER:-monitoring_user}
+      SPRING_DATASOURCE_PASSWORD: ${MONITORING_DB_PASSWORD:-monitoring_pass}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      PARCEL_SERVICE_BASE_URL: http://parcel-service:8081
+    ports:
+      - "8082:8082"
+    depends_on:
+      monitoring-db:
+        condition: service_healthy
+      parcel-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - gardens-net
+    restart: on-failure
+
+networks:
+  gardens-net:
+    driver: bridge
+
+volumes:
+  parcels_data:
+  monitoring_data:
